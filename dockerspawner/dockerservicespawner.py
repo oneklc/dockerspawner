@@ -5,6 +5,7 @@ but should be taken to mean "service"
 """
 
 from textwrap import dedent
+from pprint import pformat
 
 import docker
 from docker.errors import APIError
@@ -28,8 +29,38 @@ class DockerServiceSpawner(DockerSpawner):
     )
 
     @gen.coroutine
+    def poll(self):
+        """Check for task in `docker service ls`"""
+        container = yield self.get_container()
+        if not container:
+            self.log.warn("service not found")
+            return ""
+        tasks = yield self.docker(
+            'tasks', {'service': self.container_id})
+        if len(tasks) > 1:
+            m = "Service '%s' has %d tasks, expected 1" % (
+                self.container_name, len(tasks))
+            self.log.error(m)
+            raise Exception(m)
+        task = tasks[0]
+        self.log.debug(
+            "Service task %s status: %s",
+            self.container_id[:7],
+            pformat(task['Status']['State']),
+        )
+
+        if task['Status']['State'] == "running":
+            return None
+        else:
+            return (
+                "State={Status[State]}, "
+                "Message='{Status[Message]}', "
+                "UpdatedAt={UpdatedAt}".format(**task)
+            )
+
+    @gen.coroutine
     def get_container(self):
-        """Get the service, assert the service has one replica and VirtualIP
+        """Get the service, assert the service has one replica
         """
         self.log.debug("Getting service '%s'", self.container_name)
         try:
@@ -51,15 +82,6 @@ class DockerServiceSpawner(DockerSpawner):
             if nrep != 1:
                 m = "Service '%s' has %d replicas, expected 1" % (
                     self.container_name, nrep)
-                self.log.error(m)
-                raise Exception(m)
-            try:
-                vips = service['Endpoint']['VirtualIPs']
-            except KeyError:
-                vips = []
-            if len(vips) != 1:
-                m = "Service '%s' has %d VirutlIPs, expected 1" % (
-                    self.container_name, len(vips))
                 self.log.error(m)
                 raise Exception(m)
         return service
@@ -97,7 +119,7 @@ class DockerServiceSpawner(DockerSpawner):
             contspec = docker.types.ContainerSpec(**create_kwargs)
             template = docker.types.TaskTemplate(contspec)
             self.log.debug("Starting service [%s] with config: %s",
-                self.container_name, template)
+                           self.container_name, template)
 
             # create the service
             resp = yield self.docker(
@@ -125,8 +147,9 @@ class DockerServiceSpawner(DockerSpawner):
         Only works with use_internal_ip=True, auto port-forwarding is not
         supported.
         """
-        resp = yield self.get_container()
-        ip = resp['Endpoint']['VirtualIPs'][0]
+        # Docker swarm allows lookups by service-name, there's no need to
+        # get the IP
+        ip = self.container_name
         port = self.container_port
         return ip, port
 
