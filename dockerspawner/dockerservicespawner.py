@@ -83,12 +83,12 @@ class DockerServiceSpawner(DockerSpawner):
             mounts = [docker.types.Mount(
                 source=k, target=v['bind'], type='bind',
                 read_only=(v['mode'] == 'ro'))
-                for (k, v) in self.volume_binds.iteritems()]
+                for (k, v) in self.volume_binds.items()]
 
             # build the dictionary of keyword arguments for create_service
             create_kwargs = dict(
                 image=image,
-                env=self.get_env(),
+                env=['%s=%s' % kv for kv in self.get_env().items()],
                 mounts=mounts)
             create_kwargs.update(self.extra_create_kwargs)
             if extra_create_kwargs:
@@ -96,12 +96,13 @@ class DockerServiceSpawner(DockerSpawner):
 
             contspec = docker.types.ContainerSpec(**create_kwargs)
             template = docker.types.TaskTemplate(contspec)
-            self.log.debug("Starting service with config: %s", template)
+            self.log.debug("Starting service [%s] with config: %s",
+                self.container_name, template)
 
             # create the service
             resp = yield self.docker(
                 'create_service', template, name=self.container_name,
-                networks=[self.network_name])
+                networks=[{'Target': self.network_name}])
             self.container_id = resp['ID']
             self.log.info(
                 "Created service '%s' (id: %s) from image %s",
@@ -124,8 +125,8 @@ class DockerServiceSpawner(DockerSpawner):
         Only works with use_internal_ip=True, auto port-forwarding is not
         supported.
         """
-        service = self.get_container()
-        ip = service['Endpoint']['VirtualIPs'][0]
+        resp = yield self.get_container()
+        ip = resp['Endpoint']['VirtualIPs'][0]
         port = self.container_port
         return ip, port
 
