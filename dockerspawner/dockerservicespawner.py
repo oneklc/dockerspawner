@@ -35,8 +35,8 @@ class DockerServiceSpawner(DockerSpawner):
         if not container:
             self.log.warn("service not found")
             return ""
-        tasks = yield self.docker(
-            'tasks', {'service': self.container_id})
+        tasks = yield self.docker('tasks', {
+            'service': self.container_id, 'desired-state': 'running'})
         if len(tasks) > 1:
             m = "Service '%s' has %d tasks, expected 1" % (
                 self.container_name, len(tasks))
