@@ -2,6 +2,8 @@
 A Spawner for JupyterHub that runs each user's server in a separate docker
 service. The original "container" variable names are kept for convenience,
 but should be taken to mean "service"
+
+https://github.com/jupyterhub/jupyterhub/blob/master/docs/source/spawners.md
 """
 
 import socket
@@ -43,6 +45,16 @@ class DockerServiceSpawner(DockerSpawner):
         )
     )
 
+    log_driver = Unicode(
+        "",
+        config=True,
+        help=dedent(
+            """
+            The log driver. Driver options aren't currently supported.
+            """
+        )
+    )
+
     @gen.coroutine
     def poll(self):
         """Check for task in `docker service ls`"""
@@ -52,7 +64,7 @@ class DockerServiceSpawner(DockerSpawner):
             return ""
         tasks = yield self.docker('tasks', {
             'service': self.container_id, 'desired-state': 'running'})
-        if len(tasks) > 1:
+        if len(tasks) != 1:
             m = "Service '%s' has %d tasks, expected 1" % (
                 self.container_name, len(tasks))
             self.log.error(m)
@@ -132,8 +144,14 @@ class DockerServiceSpawner(DockerSpawner):
             if extra_create_kwargs:
                 create_kwargs.update(extra_create_kwargs)
 
+            template_kwargs = dict()
+            if self.log_driver:
+                template_kwargs['log_driver'] = docker.types.DriverConfig(
+                    self.log_driver)
+
             contspec = docker.types.ContainerSpec(**create_kwargs)
-            template = docker.types.TaskTemplate(contspec)
+            template = docker.types.TaskTemplate(
+                contspec, **template_kwargs)
             self.log.debug("Starting service [%s] with config: %s",
                            self.container_name, template)
 
@@ -163,21 +181,23 @@ class DockerServiceSpawner(DockerSpawner):
         Only works with use_internal_ip=True, auto port-forwarding is not
         supported.
         """
-        # Docker swarm allows lookups by service-name, there's no need to
-        # get the IP
         t = 0
         port = self.container_port
         while t <= self.container_timeout:
             try:
+                # Lookup service IP using Docker swarm DNS
                 ip = socket.gethostbyname(self.container_name)
                 return ip, port
             except socket.gaierror:
                 if t > self.container_timeout:
                     break
-                sleep(1)
-                t += 1
+                self.log.debug(
+                    "Unable to get IP for service '%s' after %d s, retrying",
+                    self.container_name, t)
+                sleep(2)
+                t += 2
 
-        m = "Unable to get IP for Service '%s' after %d s" % (
+        m = "Failed to get IP for Service '%s' after %d s" % (
             self.container_name, self.container_timeout)
         self.log.error(m)
         raise Exception(m)
