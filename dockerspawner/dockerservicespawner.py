@@ -4,7 +4,9 @@ service. The original "container" variable names are kept for convenience,
 but should be taken to mean "service"
 """
 
+import socket
 from textwrap import dedent
+from time import sleep
 from pprint import pformat
 
 import docker
@@ -12,7 +14,7 @@ from docker.errors import APIError
 from tornado import gen
 
 from dockerspawner import DockerSpawner
-from traitlets import Unicode
+from traitlets import Int, Unicode
 
 
 class DockerServiceSpawner(DockerSpawner):
@@ -24,6 +26,19 @@ class DockerServiceSpawner(DockerSpawner):
             """
             The name of the docker overlay network for all services. You must
             create this network yourself.
+            """
+        )
+    )
+
+    container_timeout = Int(
+        120,
+        min=0,
+        config=True,
+        help=dedent(
+            """
+            Maximum timeout (seconds) when resolving a container's IP address.
+            This must be large enough to allow time for Docker Swarm to create
+            a new service/container.
             """
         )
     )
@@ -44,7 +59,8 @@ class DockerServiceSpawner(DockerSpawner):
             raise Exception(m)
         task = tasks[0]
         self.log.debug(
-            "Service task %s status: %s",
+            "Service task '%s' (%s) status: %s",
+            self.container_name,
             self.container_id[:7],
             pformat(task['Status']['State']),
         )
@@ -149,9 +165,22 @@ class DockerServiceSpawner(DockerSpawner):
         """
         # Docker swarm allows lookups by service-name, there's no need to
         # get the IP
-        ip = self.container_name
+        t = 0
         port = self.container_port
-        return ip, port
+        while t <= self.container_timeout:
+            try:
+                ip = socket.gethostbyname(self.container_name)
+                return ip, port
+            except socket.gaierror:
+                if t > self.container_timeout:
+                    break
+                sleep(1)
+                t += 1
+
+        m = "Unable to get IP for Service '%s' after %d s" % (
+            self.container_name, self.container_timeout)
+        self.log.error(m)
+        raise Exception(m)
 
     @gen.coroutine
     def stop(self, now=False):
