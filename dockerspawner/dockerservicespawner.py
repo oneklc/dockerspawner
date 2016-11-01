@@ -7,6 +7,8 @@ https://github.com/jupyterhub/jupyterhub/blob/master/docs/source/spawners.md
 """
 
 import socket
+import pwd
+
 from textwrap import dedent
 from time import sleep
 from pprint import pformat
@@ -16,7 +18,7 @@ from docker.errors import APIError
 from tornado import gen
 
 from dockerspawner import DockerSpawner
-from traitlets import Int, Unicode
+from traitlets import Int,Integer, Unicode
 
 
 class DockerServiceSpawner(DockerSpawner):
@@ -54,6 +56,59 @@ class DockerServiceSpawner(DockerSpawner):
             """
         )
     )
+
+    host_homedir_format_string = Unicode(
+        "/home/{username}",
+        config=True,
+        help=dedent(
+            """
+            Format string for the path to the user's home directory on the host.
+            The format string should include a `username` variable, which will
+            be formatted with the user's username.
+            """
+        )
+    )
+
+    image_homedir_format_string = Unicode(
+        "/home/{username}",
+        config=True,
+        help=dedent(
+            """
+            Format string for the path to the user's home directory
+            inside the image.  The format string should include a
+            `username` variable, which will be formatted with the
+            user's username.
+            """
+        )
+    )
+
+    user_id = Integer(-1,
+                      help=dedent(
+                          """
+                          If system users are being used, then we need to know their user id
+                          in order to mount the home directory.
+
+                          User IDs are looked up in two ways:
+
+                          1. stored in the state dict (authenticator can write here)
+                          2. lookup via pwd
+                          """
+                      )
+                      )
+
+    @property
+    def host_homedir(self):
+        """
+        Path to the volume containing the user's home directory on the host.
+        """
+        return self.host_homedir_format_string.format(username=self.user.name)
+
+    @property
+    def homedir(self):
+        """
+        Path to the user's home directory in the docker image.
+        """
+        return self.image_homedir_format_string.format(username=self.user.name)
 
     @gen.coroutine
     def poll(self):
@@ -113,6 +168,25 @@ class DockerServiceSpawner(DockerSpawner):
                 self.log.error(m)
                 raise Exception(m)
         return service
+
+    def get_env(self):
+        env = super(DockerSpawner, self).get_env()
+        env.update(dict(
+            USER=self.user.name,
+            USER_ID=self.user_id,
+            HOME=self.homedir
+        ))
+        return env
+
+    def _user_id_default(self):
+        """
+        Get user_id from pwd lookup by name
+
+        If the authenticator stores user_id in the user state dict,
+        this will never be called, which is necessary if
+        the system users are not on the Hub system (i.e. Hub itself is in a container).
+        """
+        return pwd.getpwnam(self.user.name).pw_uid
 
     @gen.coroutine
     def start(self, image=None, extra_create_kwargs=None):
