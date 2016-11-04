@@ -132,8 +132,9 @@ class DockerServiceSpawner(DockerSpawner):
 
             mounts = [docker.types.Mount(
                 source=k, target=v['bind'], type='bind',
-                read_only=(v['mode'] == 'ro'))
-                for (k, v) in self.volume_binds.items()]
+                #read_only=(v['mode'] == 'ro'))
+                read_only=False)
+		for (k, v) in self.volume_binds.items()]
 
             # build the dictionary of keyword arguments for create_service
             create_kwargs = dict(
@@ -177,30 +178,47 @@ class DockerServiceSpawner(DockerSpawner):
 
     @gen.coroutine
     def get_ip_and_port(self):
-        """Queries Docker daemon for service's IP on the overlay network
+        """Queries Docker  for a service's task IP on the overlay network
         Only works with use_internal_ip=True, auto port-forwarding is not
         supported.
         """
-        t = 0
-        port = self.container_port
-        while t <= self.container_timeout:
-            try:
-                # Lookup service IP using Docker swarm DNS
-                ip = socket.gethostbyname(self.container_name)
-                return ip, port
-            except socket.gaierror:
-                if t > self.container_timeout:
-                    break
-                self.log.debug(
-                    "Unable to get IP for service '%s' after %d s, retrying",
-                    self.container_name, t)
-                sleep(2)
-                t += 2
 
-        m = "Failed to get IP for Service '%s' after %d s" % (
-            self.container_name, self.container_timeout)
-        self.log.error(m)
-        raise Exception(m)
+        #service_details = yield self.docker('inspect_service', self.container_name)
+        #serviceID = service_details['ID']
+
+        #get all the service tasks running by name
+        service_tasks = yield self.docker('tasks', {'service':self.container_name})
+
+        #FIXME:  service_tasks might be more than 1, but shouldn't be.  Toss an error if is.....
+        #at least do something smarter than this...
+        service_task = service_tasks[0]
+        if 'NetworksAttachments' in service_task:
+            ip = self.get_network_ip(service_task)
+        else:
+            raise Exception(
+                "Can't find docker tasks for service '{container_name}'.  "
+                .format(
+                    container_name=self.container_name
+                )
+            )
+
+        port = self.container_port
+
+        self.log.debug("Found service [%s] with IP: %s",
+                           self.container_name, ip)
+        return (ip, port)
+
+    def get_network_ip(self, task_settings):
+        networks = task_settings['NetworksAttachments']
+        if not networks:
+            raise Exception(
+                "Unknown docker network '{network}'. Did you create it with 'docker network create <name>' and "
+                "did you pass network_mode=<name> in extra_kwargs?".format(
+                    network=self.network_name
+                )
+            )
+        ip = networks[0]['Addresses']
+        return ip
 
     @gen.coroutine
     def stop(self, now=False):
