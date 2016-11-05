@@ -7,8 +7,6 @@ https://github.com/jupyterhub/jupyterhub/blob/master/docs/source/spawners.md
 """
 
 import socket
-import pwd
-
 from textwrap import dedent
 from time import sleep
 from pprint import pformat
@@ -18,7 +16,7 @@ from docker.errors import APIError
 from tornado import gen
 
 from dockerspawner import DockerSpawner
-from traitlets import Int,Integer, Unicode
+from traitlets import Int, Unicode
 
 
 class DockerServiceSpawner(DockerSpawner):
@@ -56,59 +54,6 @@ class DockerServiceSpawner(DockerSpawner):
             """
         )
     )
-
-    host_homedir_format_string = Unicode(
-        "/home/{username}",
-        config=True,
-        help=dedent(
-            """
-            Format string for the path to the user's home directory on the host.
-            The format string should include a `username` variable, which will
-            be formatted with the user's username.
-            """
-        )
-    )
-
-    image_homedir_format_string = Unicode(
-        "/home/{username}",
-        config=True,
-        help=dedent(
-            """
-            Format string for the path to the user's home directory
-            inside the image.  The format string should include a
-            `username` variable, which will be formatted with the
-            user's username.
-            """
-        )
-    )
-
-    user_id = Integer(-1,
-                      help=dedent(
-                          """
-                          If system users are being used, then we need to know their user id
-                          in order to mount the home directory.
-
-                          User IDs are looked up in two ways:
-
-                          1. stored in the state dict (authenticator can write here)
-                          2. lookup via pwd
-                          """
-                      )
-                      )
-
-    @property
-    def host_homedir(self):
-        """
-        Path to the volume containing the user's home directory on the host.
-        """
-        return self.host_homedir_format_string.format(username=self.user.name)
-
-    @property
-    def homedir(self):
-        """
-        Path to the user's home directory in the docker image.
-        """
-        return self.image_homedir_format_string.format(username=self.user.name)
 
     @gen.coroutine
     def poll(self):
@@ -169,25 +114,6 @@ class DockerServiceSpawner(DockerSpawner):
                 raise Exception(m)
         return service
 
-    def get_env(self):
-        env = super(DockerSpawner, self).get_env()
-        env.update(dict(
-            USER=self.user.name,
-            USER_ID=self.user_id,
-            HOME=self.homedir
-        ))
-        return env
-
-    def _user_id_default(self):
-        """
-        Get user_id from pwd lookup by name
-
-        If the authenticator stores user_id in the user state dict,
-        this will never be called, which is necessary if
-        the system users are not on the Hub system (i.e. Hub itself is in a container).
-        """
-        return pwd.getpwnam(self.user.name).pw_uid
-
     @gen.coroutine
     def start(self, image=None, extra_create_kwargs=None):
         """Start the single-user server in a docker service. You can override
@@ -206,8 +132,9 @@ class DockerServiceSpawner(DockerSpawner):
 
             mounts = [docker.types.Mount(
                 source=k, target=v['bind'], type='bind',
-                read_only=(v['mode'] == 'ro'))
-                for (k, v) in self.volume_binds.items()]
+                #read_only=(v['mode'] == 'ro'))
+                read_only=False)
+		for (k, v) in self.volume_binds.items()]
 
             # build the dictionary of keyword arguments for create_service
             create_kwargs = dict(
@@ -251,30 +178,47 @@ class DockerServiceSpawner(DockerSpawner):
 
     @gen.coroutine
     def get_ip_and_port(self):
-        """Queries Docker daemon for service's IP on the overlay network
+        """Queries Docker  for a service's task IP on the overlay network
         Only works with use_internal_ip=True, auto port-forwarding is not
         supported.
         """
-        t = 0
-        port = self.container_port
-        while t <= self.container_timeout:
-            try:
-                # Lookup service IP using Docker swarm DNS
-                ip = socket.gethostbyname(self.container_name)
-                return ip, port
-            except socket.gaierror:
-                if t > self.container_timeout:
-                    break
-                self.log.debug(
-                    "Unable to get IP for service '%s' after %d s, retrying",
-                    self.container_name, t)
-                sleep(2)
-                t += 2
 
-        m = "Failed to get IP for Service '%s' after %d s" % (
-            self.container_name, self.container_timeout)
-        self.log.error(m)
-        raise Exception(m)
+        #service_details = yield self.docker('inspect_service', self.container_name)
+        #serviceID = service_details['ID']
+
+        #get all the service tasks running by name
+        service_tasks = yield self.docker('tasks', {'service':self.container_name})
+
+        #FIXME:  service_tasks might be more than 1, but shouldn't be.  Toss an error if is.....
+        #at least do something smarter than this...
+        service_task = service_tasks[0]
+        if 'NetworksAttachments' in service_task:
+            ip = self.get_network_ip(service_task)
+        else:
+            raise Exception(
+                "Can't find docker tasks for service '{container_name}'.  "
+                .format(
+                    container_name=self.container_name
+                )
+            )
+
+        port = self.container_port
+
+        self.log.debug("Found service [%s] with IP: %s",
+                           self.container_name, ip)
+        return (ip, port)
+
+    def get_network_ip(self, task_settings):
+        networks = task_settings['NetworksAttachments']
+        if not networks:
+            raise Exception(
+                "Unknown docker network '{network}'. Did you create it with 'docker network create <name>' and "
+                "did you pass network_mode=<name> in extra_kwargs?".format(
+                    network=self.network_name
+                )
+            )
+        ip = networks[0]['Addresses']
+        return ip
 
     @gen.coroutine
     def stop(self, now=False):

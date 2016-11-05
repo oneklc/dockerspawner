@@ -1,6 +1,7 @@
 import pwd
 
-from dockerspawner import DockerSpawner
+from dockerspawner import DockerServiceSpawner
+
 from textwrap import dedent
 from traitlets import (
     Integer,
@@ -8,7 +9,7 @@ from traitlets import (
 )
 
 
-class SystemUserSpawner(DockerSpawner):
+class SystemUserSpawner(DockerServiceSpawner):
 
     container_image = Unicode("jupyterhub/systemuser", config=True)
 
@@ -131,5 +132,5 @@ class SystemUserSpawner(DockerSpawner):
         """start the single-user server in a docker container"""
         return super(SystemUserSpawner, self).start(
             image=image,
-            extra_create_kwargs={'working_dir': self.homedir}
+            extra_create_kwargs={'workdir': self.homedir}
         )
