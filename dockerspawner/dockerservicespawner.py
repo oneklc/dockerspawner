@@ -122,6 +122,40 @@ class DockerServiceSpawner(DockerSpawner):
 
         Per-instance `extra_create_kwargs` take precedence over their global
         counterparts.
+
+
+        Requires Docker 1.12+
+
+        Note to self:
+        FIXME:  This doesn't work. But soooooo close.
+        The service is spawned and is running.
+        The proxy has the right address and can reach the newly spawned service task on a remote machine in the swarm.
+        The  remotely spanwed service task can't access the hub_api as they are on different networks.
+        (ssh into the container you can't ping the address).
+        when inspecting the containers i see that the proxy_api has been spawened on the ingress network and
+        the jupyterhub-network swarm overlay network (10.0.x.x.)
+        Though the given ip is on the ingress network (10.255.x.x)
+
+        when the notebook is spawened on the remote machine it is only on the juupyterhub-network not on the ingress network.
+        It can't reach the hub api. And the notebook times out trying to reach the hub..
+         evenetaully the hub gives up waiting for the notebook even though it can reach it. and it knows its alive.
+
+
+        Possible fixes...
+        Try spawning the hub on the jupyterhub-network
+        bridge the two networks
+        add jupyter-notebook to the ingress network
+
+        Tried:  easy hack was to add the notebook to the ingress network.
+         as anything else ment messing with another code base and be nice to cheep changes here.
+         manually adding the ingress network after service spawned causes the ip of the task to change!
+         which is then recorded wrong in the proxy (boooo)
+         Thought it would be simple to add some args like:
+         c.DockerSpawner.extra_create_kwargs.update({'endpoint_config': ['8888:88888']})
+        to expose a port which would automagically add the ingress network suposedly but never had any luck specifing the port
+        documentation was thin and time was running short.
+        Moving on, sounds like docker 1.13 will resolve these woes might as well wait for that while waiting for jupyterlab
+
         """
         if not self.use_internal_ip:
             raise ValueError('use_internal_ip must be True')
