@@ -6,7 +6,6 @@ but should be taken to mean "service"
 https://github.com/jupyterhub/jupyterhub/blob/master/docs/source/spawners.md
 """
 
-import socket
 from textwrap import dedent
 from time import sleep
 from pprint import pformat
@@ -127,7 +126,12 @@ class DockerServiceSpawner(DockerSpawner):
         Requires Docker 1.12+
 
         Note to self:
-        FIXME:  This doesn't work. But soooooo close.
+        FIXME:  This works kinda..... (soooooo close sigh) with some manual intervention.
+        Start hub.  don't use docker compose as doesn't start on swarm network correctly.
+        when services are spawned for users containers manual add the ingress network to them.
+        ssh to the machine that is running the service task and kill the task.
+        when task respawned will be on ingress network and will work. booooo
+
         The service is spawned and is running.
         The proxy has the right address and can reach the newly spawned service task on a remote machine in the swarm.
         The  remotely spanwed service task can't access the hub_api as they are on different networks.
@@ -138,7 +142,7 @@ class DockerServiceSpawner(DockerSpawner):
 
         when the notebook is spawened on the remote machine it is only on the juupyterhub-network not on the ingress network.
         It can't reach the hub api. And the notebook times out trying to reach the hub..
-         evenetaully the hub gives up waiting for the notebook even though it can reach it. and it knows its alive.
+         eventually the hub gives up waiting for the notebook even though it can reach it. and it knows its alive.
 
 
         Possible fixes...
@@ -149,12 +153,19 @@ class DockerServiceSpawner(DockerSpawner):
         Tried:  easy hack was to add the notebook to the ingress network.
          as anything else ment messing with another code base and be nice to cheep changes here.
          manually adding the ingress network after service spawned causes the ip of the task to change!
+         Did this by: dzdo docker service update --publish-add 8888 jupyter-xxxxx
          which is then recorded wrong in the proxy (boooo)
-         Thought it would be simple to add some args like:
+         So killing with:  docker stop container_name
+         Causes it to get respawned correctly, on both networks and everything works.
+
+         So added code to spawn service on the ingress network but got error:
+         {'Target': 'ingress'}
+         Service cannot be explicitly attached to \\"ingress\\" network which is a swarm internal network"}'
+         but read if a port is exposed will be  automagically add the ingress network.
+         thought it would be simple to add some args like:
          c.DockerSpawner.extra_create_kwargs.update({'endpoint_config': ['8888:88888']})
-        to expose a port which would automagically add the ingress network suposedly but never had any luck specifing the port
-        documentation was thin and time was running short.
-        Moving on, sounds like docker 1.13 will resolve these woes might as well wait for that while waiting for jupyterlab
+         But the documentation on exposing a port was confusing and i gave up as time was running short.
+         Moving on, sounds like docker 1.13 will resolve these woes might as well wait for that while waiting for jupyterlab
 
         """
         if not self.use_internal_ip:
