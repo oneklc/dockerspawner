@@ -183,30 +183,40 @@ class DockerServiceSpawner(DockerSpawner):
         supported.
         """
 
-        #service_details = yield self.docker('inspect_service', self.container_name)
-        #serviceID = service_details['ID']
-
-        #get all the service tasks running by name
-        service_tasks = yield self.docker('tasks', {'service':self.container_name})
-
-        #FIXME:  service_tasks might be more than 1, but shouldn't be.  Toss an error if is.....
-        #at least do something smarter than this...
-        service_task = service_tasks[0]
-        if 'NetworksAttachments' in service_task:
-            ip = self.get_network_ip(service_task)
-        else:
-            raise Exception(
-                "Can't find docker tasks for service '{container_name}'.  "
-                .format(
-                    container_name=self.container_name
-                )
-            )
-
+        t=0
         port = self.container_port
 
-        self.log.debug("Found service [%s] with IP: %s",
-                           self.container_name, ip)
-        return (ip, port)
+        while t <= self.container_timeout:
+
+            #get all the service tasks running by name
+            service_tasks = yield self.docker('tasks', {'service':self.container_name})
+
+
+            if service_tasks :
+                # FIXME:  service_tasks might be more than 1, but shouldn't be.  Toss an error if is.....
+                # at least do something smarter than this...
+                service_task = service_tasks[0]
+                self.log.debug("Found service [%s].  checking for network...", self.container_name)
+
+                if 'NetworksAttachments' in service_task:
+                    ip = self.get_network_ip(service_task).split('/')[0]  #remove /24 at end of ip address
+                    self.log.debug("Found network for service [%s] with IP: %s", self.container_name, ip)
+                    return (ip, port)
+
+            else:
+                if t > self.container_timeout:
+                    break
+
+                self.log.debug("Unable to get IP for service '%s' after %d s, retrying", self.container_name, t)
+                sleep(5)
+                t += 2
+
+
+
+
+        errmsg = "Cant find docker tasks for service '{container_name}'.  ".format(container_name=self.container_name)
+        self.log.error(errmsg)
+        raise Exception(errmsg)
 
     def get_network_ip(self, task_settings):
         networks = task_settings['NetworksAttachments']
@@ -218,7 +228,7 @@ class DockerServiceSpawner(DockerSpawner):
                 )
             )
         ip = networks[0]['Addresses']
-        return ip
+        return ip[0]
 
     @gen.coroutine
     def stop(self, now=False):

@@ -32,7 +32,7 @@ class SystemUserSpawner(DockerServiceSpawner):
             """
             Format string for the path to the user's home directory
             inside the image.  The format string should include a
-            `username` variable, which will be formatted with the
+            `username` variable, which will be formatted with theself.hub.api_url
             user's username.
             """
         )

@@ -10,6 +10,8 @@ WORKDIR /home
 RUN userdel jovyan && rm -rf /home/jovyan
 ENV SHELL /bin/bash
 ADD systemuser.sh /srv/singleuser/systemuser.sh
+RUN chmod 777 /srv/singleuser/systemuser.sh
+
 # smoke test entrypoint
 RUN USER_ID=65000 USER=systemusertest sh /srv/singleuser/systemuser.sh -h && userdel systemusertest
 
