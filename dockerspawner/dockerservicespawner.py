@@ -207,7 +207,7 @@ class DockerServiceSpawner(DockerSpawner):
             # create the service
             resp = yield self.docker(
                 'create_service', template, name=self.container_name,
-                networks=[{'Target': self.network_name}])#, endpoint_spec=endpoint_spec)
+                networks=[{'Target': self.network_name}], endpoint_spec=endpoint_spec)
             self.container_id = resp['ID']
             self.log.info(
                 "Created service '%s' (id: %s) from image %s",
