@@ -195,6 +195,9 @@ class DockerServiceSpawner(DockerSpawner):
                 template_kwargs['log_driver'] = docker.types.DriverConfig(
                     self.log_driver)
 
+            #this requires a version of docker-py that is greater than 1.10.6
+            endpoint_spec = docker.types.EndpointSpec(ports={8888: 8888})
+
             contspec = docker.types.ContainerSpec(**create_kwargs)
             template = docker.types.TaskTemplate(
                 contspec, **template_kwargs)
@@ -204,7 +207,7 @@ class DockerServiceSpawner(DockerSpawner):
             # create the service
             resp = yield self.docker(
                 'create_service', template, name=self.container_name,
-                networks=[{'Target': self.network_name}])
+                networks=[{'Target': self.network_name}])#, endpoint_spec=endpoint_spec)
             self.container_id = resp['ID']
             self.log.info(
                 "Created service '%s' (id: %s) from image %s",
@@ -297,7 +300,7 @@ class DockerServiceSpawner(DockerSpawner):
                     network=self.network_name
                 )
             )
-        ip = networks[0]['Addresses']
+        ip = networks[-1]['Addresses']
         return ip[0]
 
 
